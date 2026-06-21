@@ -48,7 +48,7 @@ MAINTENANCE.md         Troubleshooting and maintenance guide
 ## Run
 
 ```bash
-cd /home/phyoshan8/automation-projects/telegram-clothing-order-bot
+cd /path/to/your/project
 . .venv/bin/activate
 python -m src.sheet_setup
 python -m src.bot
@@ -57,7 +57,7 @@ python -m src.bot
 ## Test
 
 ```bash
-cd /home/phyoshan8/automation-projects/telegram-clothing-order-bot
+cd /path/to/your/project
 . .venv/bin/activate
 python -m py_compile src/*.py
 pytest -q
