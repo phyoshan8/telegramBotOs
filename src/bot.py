@@ -15,15 +15,8 @@ from telegram.ext import (
 from .config import load_settings
 from .i18n import button_regex, confirm_menu, language_menu, main_menu, settings_menu, t
 from .reports import EDIT_FIELDS, edit_key_help, list_message, normalize_edit_key, order_preview, saved_message, today_report_message
-from .storage_sheets import (
-    append_order,
-    get_user_language,
-    pending_delivery_orders,
-    set_user_language,
-    setup_sheet,
-    today_report,
-    unpaid_orders,
-)
+from .services import AdminService, OrderService
+from .storage_factory import build_storage
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,14 +47,25 @@ def settings_from_context(context: ContextTypes.DEFAULT_TYPE):
     return context.application.bot_data["settings"]
 
 
+def storage_from_context(context: ContextTypes.DEFAULT_TYPE):
+    return context.application.bot_data["storage"]
+
+
+def order_service_from_context(context: ContextTypes.DEFAULT_TYPE):
+    return context.application.bot_data["order_service"]
+
+
+def admin_service_from_context(context: ContextTypes.DEFAULT_TYPE):
+    return context.application.bot_data["admin_service"]
+
+
 def get_lang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str | None:
     if "lang" in context.user_data:
         return context.user_data["lang"]
     user = update.effective_user
     if not user:
         return None
-    settings = settings_from_context(context)
-    lang = get_user_language(settings, user.id)
+    lang = storage_from_context(context).get_user_language(user.id)
     if lang:
         context.user_data["lang"] = lang
     return lang
@@ -83,9 +87,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     lang = "my" if text == "မြန်မာ" else "en"
-    settings = settings_from_context(context)
     user_id, username, first_name = user_identity(update)
-    set_user_language(settings, user_id, username, first_name, lang)
+    storage_from_context(context).set_user_language(user_id, username, first_name, lang)
     context.user_data["lang"] = lang
     await update.message.reply_text(t(lang, "language_saved"), reply_markup=main_menu(lang))
 
@@ -198,9 +201,8 @@ async def confirm_or_change(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = get_lang(update, context) or "en"
     text = update.message.text.strip()
     if text in {"✅ Confirm", "✅ အတည်ပြု"}:
-        settings = settings_from_context(context)
         context.user_data["order"]["Status"] = "Open"
-        row = append_order(settings, context.user_data["order"])
+        row = order_service_from_context(context).create_order(context.user_data["order"])
         context.user_data.pop("order", None)
         context.user_data.pop("edit_key", None)
         await update.message.reply_text(saved_message(row, lang), reply_markup=main_menu(lang))
@@ -255,7 +257,7 @@ async def receive_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def show_unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
-    rows = unpaid_orders(settings_from_context(context))
+    rows = admin_service_from_context(context).unpaid_orders()
     title = "Unpaid List 📋" if lang == "en" else "မရှင်းရစာရင်း 📋"
     empty = "No unpaid/COD/deposit orders ✅" if lang == "en" else "မရှင်းရ/COD/Deposit order မရှိပါ ✅"
     await update.message.reply_text(list_message(title, rows, empty), reply_markup=main_menu(lang))
@@ -263,7 +265,7 @@ async def show_unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def show_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
-    rows = pending_delivery_orders(settings_from_context(context))
+    rows = admin_service_from_context(context).pending_delivery_orders()
     title = "Pending Delivery 🚚" if lang == "en" else "ပို့ရန်စာရင်း 🚚"
     empty = "No pending delivery orders ✅" if lang == "en" else "ပို့ရန်ကျန် order မရှိပါ ✅"
     await update.message.reply_text(list_message(title, rows, empty), reply_markup=main_menu(lang))
@@ -271,7 +273,7 @@ async def show_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def show_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
-    report = today_report(settings_from_context(context))
+    report = admin_service_from_context(context).today_report()
     await update.message.reply_text(today_report_message(report, lang), reply_markup=main_menu(lang))
 
 
@@ -285,10 +287,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 def main() -> None:
     settings = load_settings()
-    setup_sheet(settings)
+    storage = build_storage(settings)
+    storage.setup()
 
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.bot_data["settings"] = settings
+    app.bot_data["storage"] = storage
+    app.bot_data["order_service"] = OrderService(storage)
+    app.bot_data["admin_service"] = AdminService(storage)
 
     conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(button_regex("add_order")), begin_order)],

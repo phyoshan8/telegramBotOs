@@ -236,3 +236,35 @@ def set_user_language(
             ws.update(f"A{index}:E{index}", [[user_id, username or "", first_name or "", language, now]])
             return
     ws.append_row([user_id, username or "", first_name or "", language, now], value_input_option="USER_ENTERED")
+
+
+class GoogleSheetsStorage:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    def setup(self) -> None:
+        setup_sheet(self.settings)
+
+    def append_order(self, order: dict[str, str]) -> dict[str, str]:
+        return append_order(self.settings, order)
+
+    def unpaid_orders(self) -> list[dict[str, str]]:
+        return unpaid_orders(self.settings)
+
+    def pending_delivery_orders(self) -> list[dict[str, str]]:
+        return pending_delivery_orders(self.settings)
+
+    def today_report(self) -> dict[str, int]:
+        return today_report(self.settings)
+
+    def get_user_language(self, telegram_user_id: int) -> str | None:
+        return get_user_language(self.settings, telegram_user_id)
+
+    def set_user_language(
+        self,
+        telegram_user_id: int,
+        username: str | None,
+        first_name: str | None,
+        language: str,
+    ) -> None:
+        set_user_language(self.settings, telegram_user_id, username, first_name, language)
