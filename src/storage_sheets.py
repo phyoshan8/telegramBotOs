@@ -238,27 +238,143 @@ def set_user_language(
     ws.append_row([user_id, username or "", first_name or "", language, now], value_input_option="USER_ENTERED")
 
 
+class GoogleSheetsExporter:
+    def __init__(self, settings: Settings, worksheet: Any | None = None) -> None:
+        self.settings = settings
+        self._worksheet_override = worksheet
+
+    def setup(self) -> None:
+        if self._worksheet_override is None:
+            setup_sheet(self.settings)
+
+    def worksheet(self):
+        if self._worksheet_override is not None:
+            return self._worksheet_override
+        return _worksheet(self.settings)
+
+    def export_order(self, row: dict[str, str]) -> None:
+        ws = self.worksheet()
+        row_values = [row.get(header, "") for header in HEADERS]
+        order_id = row.get("ID", "")
+        for index, existing in enumerate(ws.get_all_values()[1:], start=2):
+            if existing and existing[0] == order_id:
+                ws.update(f"A{index}:P{index}", [row_values])
+                return
+        ws.append_row(row_values, value_input_option="USER_ENTERED")
+
+
 class GoogleSheetsStorage:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._client: gspread.Client | None = None
+        self._spreadsheet: gspread.Spreadsheet | None = None
+        self._orders_ws: gspread.Worksheet | None = None
+        self._user_settings_ws: gspread.Worksheet | None = None
+
+    @property
+    def client(self) -> gspread.Client:
+        if self._client is None:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ]
+            credentials = Credentials.from_service_account_file(
+                str(self.settings.google_service_account_file), scopes=scopes
+            )
+            self._client = gspread.authorize(credentials)
+        return self._client
+
+    @property
+    def spreadsheet(self) -> gspread.Spreadsheet:
+        if self._spreadsheet is None:
+            self._spreadsheet = self.client.open_by_key(self.settings.google_sheet_id)
+        return self._spreadsheet
+
+    def _get_orders_ws(self) -> gspread.Worksheet:
+        if self._orders_ws is None:
+            self._orders_ws = ensure_worksheet(self.spreadsheet, self.settings.google_sheet_tab)
+        return self._orders_ws
+
+    def _get_user_settings_ws(self) -> gspread.Worksheet:
+        if self._user_settings_ws is None:
+            ws = ensure_worksheet(self.spreadsheet, USER_SETTINGS_TAB)
+            if ws.row_values(1) != USER_SETTINGS_HEADERS:
+                ws.update("A1:E1", [USER_SETTINGS_HEADERS])
+            self._user_settings_ws = ws
+        return self._user_settings_ws
 
     def setup(self) -> None:
         setup_sheet(self.settings)
 
     def append_order(self, order: dict[str, str]) -> dict[str, str]:
-        return append_order(self.settings, order)
+        ws = self._get_orders_ws()
+        now = _now(self.settings)
+        order_id = f"C-{len(ws.get_all_records()) + 1:04d}"
+        row = {
+            "ID": order_id,
+            "Date": now.strftime("%Y-%m-%d"),
+            "Customer Name": order.get("Customer Name", "").strip(),
+            "Phone": order.get("Phone", "").strip(),
+            "Item": order.get("Item", "").strip(),
+            "Size": order.get("Size", "").strip(),
+            "Color": order.get("Color", "").strip(),
+            "Quantity": str(order.get("Quantity", "")).strip(),
+            "Amount": str(_parse_amount(order.get("Amount", "0"))),
+            "Payment Status": order.get("Payment Status", "").strip(),
+            "Payment Method": order.get("Payment Method", "").strip(),
+            "Delivery Status": order.get("Delivery Status", "").strip(),
+            "Address/Note": order.get("Address/Note", "").strip(),
+            "Status": order.get("Status", "Open").strip() or "Open",
+            "Created At": now.isoformat(timespec="seconds"),
+            "Updated At": now.isoformat(timespec="seconds"),
+        }
+        ws.append_row([row[h] for h in HEADERS], value_input_option="USER_ENTERED")
+        return row
 
     def unpaid_orders(self) -> list[dict[str, str]]:
-        return unpaid_orders(self.settings)
+        ws = self._get_orders_ws()
+        return [
+            {str(k): str(v) for k, v in row.items()}
+            for row in ws.get_all_records()
+            if row.get("Status", "Open") == "Open"
+            and row.get("Payment Status") in UNPAID_PAYMENT_STATUSES
+        ]
 
     def pending_delivery_orders(self) -> list[dict[str, str]]:
-        return pending_delivery_orders(self.settings)
+        ws = self._get_orders_ws()
+        return [
+            {str(k): str(v) for k, v in row.items()}
+            for row in ws.get_all_records()
+            if row.get("Status", "Open") == "Open"
+            and row.get("Delivery Status") == PENDING_DELIVERY_STATUS
+        ]
 
     def today_report(self) -> dict[str, int]:
-        return today_report(self.settings)
+        today = _now(self.settings).strftime("%Y-%m-%d")
+        ws = self._get_orders_ws()
+        orders = [
+            row for row in ws.get_all_records()
+            if row.get("Date") == today
+        ]
+        total_amount = sum(_parse_amount(row.get("Amount")) for row in orders)
+        unpaid = [row for row in orders if row.get("Payment Status") in UNPAID_PAYMENT_STATUSES]
+        pending = [row for row in orders if row.get("Delivery Status") == PENDING_DELIVERY_STATUS]
+        return {
+            "total_orders": len(orders),
+            "total_amount": total_amount,
+            "unpaid_amount": sum(_parse_amount(row.get("Amount")) for row in unpaid),
+            "unpaid_count": len(unpaid),
+            "pending_count": len(pending),
+        }
 
     def get_user_language(self, telegram_user_id: int) -> str | None:
-        return get_user_language(self.settings, telegram_user_id)
+        ws = self._get_user_settings_ws()
+        user_id = str(telegram_user_id)
+        for row in ws.get_all_records():
+            if str(row.get("Telegram User ID", "")) == user_id:
+                lang = str(row.get("Language", "")).strip()
+                return lang if lang in {"en", "my"} else None
+        return None
 
     def set_user_language(
         self,
@@ -267,4 +383,14 @@ class GoogleSheetsStorage:
         first_name: str | None,
         language: str,
     ) -> None:
-        set_user_language(self.settings, telegram_user_id, username, first_name, language)
+        if language not in {"en", "my"}:
+            raise ValueError("language must be 'en' or 'my'")
+        ws = self._get_user_settings_ws()
+        user_id = str(telegram_user_id)
+        now = _now(self.settings).isoformat(timespec="seconds")
+        values = ws.get_all_values()
+        for index, row in enumerate(values[1:], start=2):
+            if row and row[0] == user_id:
+                ws.update(f"A{index}:E{index}", [[user_id, username or "", first_name or "", language, now]])
+                return
+        ws.append_row([user_id, username or "", first_name or "", language, now], value_input_option="USER_ENTERED")
