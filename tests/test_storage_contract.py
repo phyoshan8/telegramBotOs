@@ -1,3 +1,5 @@
+from src.storage_mirror import MirroredStorage
+from src.storage import Storage
 from src.storage_sheets import GoogleSheetsStorage
 
 
@@ -50,3 +52,12 @@ def test_fake_storage_shape_matches_expected_contract():
 def test_google_sheets_storage_exposes_required_methods():
     for method_name in REQUIRED_METHODS:
         assert hasattr(GoogleSheetsStorage, method_name)
+
+
+def test_mirrored_storage_exposes_required_methods():
+    for method_name in REQUIRED_METHODS:
+        assert hasattr(MirroredStorage, method_name)
+
+
+def test_storage_protocol_includes_get_user_role():
+    assert hasattr(Storage, "get_user_role")

@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from supabase import create_client, Client
+
+from supabase import Client, create_client
 
 from .config import Settings
 from .storage import Storage
 
 
 class SupabaseStorage(Storage):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, client: Client | None = None) -> None:
         self.settings = settings
+        if client is not None:
+            self.client = client
+            return
         if not settings.supabase_url or not settings.supabase_service_role_key:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be provided")
         self.client: Client = create_client(settings.supabase_url, settings.supabase_service_role_key)
@@ -45,8 +49,7 @@ class SupabaseStorage(Storage):
 
     def append_order(self, order: dict[str, str]) -> dict[str, str]:
         now = self._now()
-        
-        # Parse fields to correct types to match postgres schema
+
         try:
             quantity = int(float(str(order.get("Quantity", "1")).replace(",", "").strip() or 1))
         except ValueError:
@@ -70,41 +73,42 @@ class SupabaseStorage(Storage):
             "payment_method": order.get("Payment Method", "").strip() or None,
             "delivery_status": order.get("Delivery Status", "").strip(),
             "address_note": order.get("Address/Note", "").strip() or None,
-            "status": order.get("Status", "Open").strip() or "Open"
+            "status": order.get("Status", "Open").strip() or "Open",
         }
 
         res = self.client.table("orders").insert(row_data).execute()
-        
+
         if not res.data:
             raise RuntimeError("Failed to save order to Supabase")
-            
+
         return self._to_sheet_format(res.data[0])
 
     def unpaid_orders(self) -> list[dict[str, str]]:
-        res = self.client.table("orders") \
-            .select("*") \
-            .eq("status", "Open") \
-            .in_("payment_status", ["Unpaid", "COD", "Deposit"]) \
-            .order("id") \
+        res = (
+            self.client.table("orders")
+            .select("*")
+            .eq("status", "Open")
+            .in_("payment_status", ["Unpaid", "COD", "Deposit"])
+            .order("id")
             .execute()
+        )
         return [self._to_sheet_format(row) for row in res.data]
 
     def pending_delivery_orders(self) -> list[dict[str, str]]:
-        res = self.client.table("orders") \
-            .select("*") \
-            .eq("status", "Open") \
-            .eq("delivery_status", "Pending") \
-            .order("id") \
+        res = (
+            self.client.table("orders")
+            .select("*")
+            .eq("status", "Open")
+            .eq("delivery_status", "Pending")
+            .order("id")
             .execute()
+        )
         return [self._to_sheet_format(row) for row in res.data]
 
     def today_report(self) -> dict[str, int]:
         today = self._now().strftime("%Y-%m-%d")
-        res = self.client.table("orders") \
-            .select("*") \
-            .eq("order_date", today) \
-            .execute()
-        
+        res = self.client.table("orders").select("*").eq("order_date", today).execute()
+
         orders = res.data
         total_amount = sum(row.get("amount") or 0 for row in orders)
         unpaid = [row for row in orders if row.get("payment_status") in {"Unpaid", "COD", "Deposit"}]
@@ -118,15 +122,24 @@ class SupabaseStorage(Storage):
             "pending_count": len(pending),
         }
 
+    def list_all_orders(self) -> list[dict[str, str]]:
+        res = self.client.table("orders").select("*").order("id").execute()
+        return [self._to_sheet_format(row) for row in res.data]
+
     def get_user_language(self, telegram_user_id: int) -> str | None:
-        res = self.client.table("user_settings") \
-            .select("language") \
-            .eq("telegram_user_id", telegram_user_id) \
-            .execute()
-        
+        res = self.client.table("user_settings").select("language").eq("telegram_user_id", telegram_user_id).execute()
+
         if res.data:
             lang = str(res.data[0].get("language", "")).strip()
             return lang if lang in {"en", "my"} else None
+        return None
+
+    def get_user_role(self, telegram_user_id: int) -> str | None:
+        res = self.client.table("user_settings").select("role").eq("telegram_user_id", telegram_user_id).execute()
+
+        if res.data:
+            role = str(res.data[0].get("role", "")).strip().lower()
+            return role or None
         return None
 
     def set_user_language(
@@ -144,9 +157,7 @@ class SupabaseStorage(Storage):
             "username": username or None,
             "first_name": first_name or None,
             "language": language,
-            "updated_at": self._now().isoformat()
+            "updated_at": self._now().isoformat(),
         }
 
-        self.client.table("user_settings") \
-            .upsert(row_data, on_conflict="telegram_user_id") \
-            .execute()
+        self.client.table("user_settings").upsert(row_data, on_conflict="telegram_user_id").execute()

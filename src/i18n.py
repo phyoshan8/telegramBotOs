@@ -12,6 +12,7 @@ TEXT = {
         "unpaid_list": "📋 Unpaid List",
         "pending_list": "🚚 Pending Delivery",
         "today_report": "📊 Today Report",
+        "admin_panel": "🛠️ Admin Panel",
         "settings": "⚙️ Settings",
         "language": "🌐 Language",
         "back": "⬅️ Back",
@@ -36,6 +37,8 @@ TEXT = {
         "enter_new_value": "Enter new value for {field}.",
         "cancelled": "Cancelled. Back to main menu.",
         "settings_title": "Settings: choose what to change.",
+        "admin_panel_title": "Admin panel: more actions will be added here.",
+        "admin_access_denied": "Admin only ❌",
     },
     "my": {
         "choose_language": "ဘာသာစကားရွေးပါ။",
@@ -45,6 +48,7 @@ TEXT = {
         "unpaid_list": "📋 မရှင်းရစာရင်း",
         "pending_list": "🚚 ပို့ရန်စာရင်း",
         "today_report": "📊 ဒီနေ့ Report",
+        "admin_panel": "🛠️ Admin Panel",
         "settings": "⚙️ Settings / ဘာသာစကား",
         "language": "🌐 ဘာသာစကား",
         "back": "⬅️ နောက်သို့",
@@ -69,6 +73,8 @@ TEXT = {
         "enter_new_value": "{field} အတွက် value အသစ် ရိုက်ပါ။",
         "cancelled": "မလုပ်တော့ပါ။ Main menu ပြန်သွားပါမယ်။",
         "settings_title": "Settings: ပြင်ချင်တာကို ရွေးပါ။",
+        "admin_panel_title": "Admin panel: နောက်ထပ် action တွေ ဒီမှာ ထည့်သွားပါမယ်။",
+        "admin_access_denied": "Admin only ❌",
     },
 }
 
@@ -77,6 +83,7 @@ BUTTONS = {
     "unpaid_list": {"📋 Unpaid List", "📋 မရှင်းရစာရင်း", "📋 Unpaid List / မရှင်းရစာရင်း"},
     "pending_list": {"🚚 Pending Delivery", "🚚 ပို့ရန်စာရင်း", "🚚 Pending / ပို့ရန်စာရင်း"},
     "today_report": {"📊 Today Report", "📊 ဒီနေ့ Report", "📊 Today Report / ဒီနေ့ Report"},
+    "admin_panel": {"🛠️ Admin Panel"},
     "settings": {"⚙️ Settings", "⚙️ Settings / ဘာသာစကား"},
     "language": {"🌐 Language", "🌐 ဘာသာစကား"},
     "back": {"⬅️ Back", "⬅️ နောက်သို့"},
@@ -96,15 +103,15 @@ def button_regex(name: str) -> str:
     return "^(" + "|".join(re.escape(x) for x in BUTTONS[name]) + ")$"
 
 
-def main_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [
-            [t(lang, "add_order")],
-            [t(lang, "unpaid_list"), t(lang, "pending_list")],
-            [t(lang, "today_report"), t(lang, "settings")],
-        ],
-        resize_keyboard=True,
-    )
+def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [t(lang, "add_order")],
+        [t(lang, "unpaid_list"), t(lang, "pending_list")],
+        [t(lang, "today_report"), t(lang, "settings")],
+    ]
+    if is_admin:
+        rows.insert(2, [t(lang, "admin_panel")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def language_menu() -> ReplyKeyboardMarkup:
