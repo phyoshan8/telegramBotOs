@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram.error import TimedOut
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -59,6 +60,18 @@ def admin_service_from_context(context: ContextTypes.DEFAULT_TYPE):
     return context.application.bot_data["admin_service"]
 
 
+async def reply_text_safe(update: Update, text: str, **kwargs) -> None:
+    message = update.message
+    if not message:
+        logger.warning("Skipping reply_text because update.message is missing")
+        return
+    try:
+        await message.reply_text(text, **kwargs)
+    except TimedOut:
+        logger.warning("Telegram reply timed out; retrying once", exc_info=True)
+        await message.reply_text(text, **kwargs)
+
+
 def get_lang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str | None:
     if "lang" in context.user_data:
         return context.user_data["lang"]
@@ -79,9 +92,9 @@ def user_identity(update: Update) -> tuple[int, str | None, str | None]:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context)
     if not lang:
-        await update.message.reply_text(t("en", "choose_language"), reply_markup=language_menu())
+        await reply_text_safe(update,t("en", "choose_language"), reply_markup=language_menu())
         return
-    await update.message.reply_text(t(lang, "welcome"), reply_markup=main_menu(lang))
+    await reply_text_safe(update,t(lang, "welcome"), reply_markup=main_menu(lang))
 
 
 async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,60 +103,60 @@ async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id, username, first_name = user_identity(update)
     storage_from_context(context).set_user_language(user_id, username, first_name, lang)
     context.user_data["lang"] = lang
-    await update.message.reply_text(t(lang, "language_saved"), reply_markup=main_menu(lang))
+    await reply_text_safe(update,t(lang, "language_saved"), reply_markup=main_menu(lang))
 
 
 async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
-    await update.message.reply_text(t(lang, "settings_title"), reply_markup=settings_menu(lang))
+    await reply_text_safe(update,t(lang, "settings_title"), reply_markup=settings_menu(lang))
 
 
 async def ask_language_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(t(get_lang(update, context) or "en", "choose_language"), reply_markup=language_menu())
+    await reply_text_safe(update,t(get_lang(update, context) or "en", "choose_language"), reply_markup=language_menu())
 
 
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
-    await update.message.reply_text(t(lang, "welcome"), reply_markup=main_menu(lang))
+    await reply_text_safe(update,t(lang, "welcome"), reply_markup=main_menu(lang))
 
 
 async def begin_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = get_lang(update, context)
     if not lang:
-        await update.message.reply_text(t("en", "choose_language"), reply_markup=language_menu())
+        await reply_text_safe(update,t("en", "choose_language"), reply_markup=language_menu())
         return ConversationHandler.END
     context.user_data["order"] = {}
-    await update.message.reply_text(t(lang, "ask_name"), reply_markup=ReplyKeyboardRemove())
+    await reply_text_safe(update,t(lang, "ask_name"), reply_markup=ReplyKeyboardRemove())
     return ASK_NAME
 
 
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Customer Name"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_phone"))
+    await reply_text_safe(update,t(get_lang(update, context), "ask_phone"))
     return ASK_PHONE
 
 
 async def ask_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Phone"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_item"))
+    await reply_text_safe(update,t(get_lang(update, context), "ask_item"))
     return ASK_ITEM
 
 
 async def ask_size(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Item"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_size"))
+    await reply_text_safe(update,t(get_lang(update, context), "ask_size"))
     return ASK_SIZE
 
 
 async def ask_color(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Size"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_color"))
+    await reply_text_safe(update,t(get_lang(update, context), "ask_color"))
     return ASK_COLOR
 
 
 async def ask_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Color"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_quantity"))
+    await reply_text_safe(update,t(get_lang(update, context), "ask_quantity"))
     return ASK_QUANTITY
 
 
@@ -151,10 +164,10 @@ async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = get_lang(update, context)
     qty = update.message.text.strip().replace(",", "")
     if not qty.isdigit():
-        await update.message.reply_text(t(lang, "invalid_quantity"))
+        await reply_text_safe(update,t(lang, "invalid_quantity"))
         return ASK_QUANTITY
     context.user_data["order"]["Quantity"] = qty
-    await update.message.reply_text(t(lang, "ask_amount"))
+    await reply_text_safe(update,t(lang, "ask_amount"))
     return ASK_AMOUNT
 
 
@@ -162,35 +175,35 @@ async def ask_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = get_lang(update, context)
     amount = update.message.text.strip().replace(",", "")
     if not amount.isdigit():
-        await update.message.reply_text(t(lang, "invalid_amount"))
+        await reply_text_safe(update,t(lang, "invalid_amount"))
         return ASK_AMOUNT
     context.user_data["order"]["Amount"] = amount
-    await update.message.reply_text(t(lang, "ask_payment_status"), reply_markup=PAYMENT_STATUS_MENU)
+    await reply_text_safe(update,t(lang, "ask_payment_status"), reply_markup=PAYMENT_STATUS_MENU)
     return ASK_PAYMENT_STATUS
 
 
 async def ask_payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Payment Status"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_payment_method"), reply_markup=PAYMENT_METHOD_MENU)
+    await reply_text_safe(update,t(get_lang(update, context), "ask_payment_method"), reply_markup=PAYMENT_METHOD_MENU)
     return ASK_PAYMENT_METHOD
 
 
 async def ask_delivery_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Payment Method"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_delivery_status"), reply_markup=DELIVERY_STATUS_MENU)
+    await reply_text_safe(update,t(get_lang(update, context), "ask_delivery_status"), reply_markup=DELIVERY_STATUS_MENU)
     return ASK_DELIVERY_STATUS
 
 
 async def ask_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["order"]["Delivery Status"] = update.message.text.strip()
-    await update.message.reply_text(t(get_lang(update, context), "ask_note"), reply_markup=ReplyKeyboardRemove())
+    await reply_text_safe(update,t(get_lang(update, context), "ask_note"), reply_markup=ReplyKeyboardRemove())
     return ASK_NOTE
 
 
 async def show_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = get_lang(update, context) or "en"
     context.user_data["order"]["Address/Note"] = update.message.text.strip()
-    await update.message.reply_text(
+    await reply_text_safe(update,
         order_preview(context.user_data["order"], lang) + "\n\n" + t(lang, "correct_question"),
         reply_markup=confirm_menu(lang),
     )
@@ -205,14 +218,14 @@ async def confirm_or_change(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         row = order_service_from_context(context).create_order(context.user_data["order"])
         context.user_data.pop("order", None)
         context.user_data.pop("edit_key", None)
-        await update.message.reply_text(saved_message(row, lang), reply_markup=main_menu(lang))
+        await reply_text_safe(update,saved_message(row, lang), reply_markup=main_menu(lang))
         return ConversationHandler.END
     if text in {"✏️ Change", "✏️ ပြင်မယ်"}:
-        await update.message.reply_text(edit_key_help(lang), reply_markup=ReplyKeyboardRemove())
+        await reply_text_safe(update,edit_key_help(lang), reply_markup=ReplyKeyboardRemove())
         return ASK_EDIT_KEY
     if text in {"❌ Cancel", "❌ မလုပ်တော့ပါ", "Cancel / မလုပ်တော့ပါ"}:
         return await cancel(update, context)
-    await update.message.reply_text(t(lang, "correct_question"), reply_markup=confirm_menu(lang))
+    await reply_text_safe(update,t(lang, "correct_question"), reply_markup=confirm_menu(lang))
     return ASK_CONFIRM
 
 
@@ -220,17 +233,17 @@ async def receive_edit_key(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = get_lang(update, context) or "en"
     key = normalize_edit_key(update.message.text)
     if not key:
-        await update.message.reply_text(t(lang, "invalid_key"))
+        await reply_text_safe(update,t(lang, "invalid_key"))
         return ASK_EDIT_KEY
     context.user_data["edit_key"] = key
     if key == "Pay":
-        await update.message.reply_text(t(lang, "ask_payment_status"), reply_markup=PAYMENT_STATUS_MENU)
+        await reply_text_safe(update,t(lang, "ask_payment_status"), reply_markup=PAYMENT_STATUS_MENU)
     elif key == "Method":
-        await update.message.reply_text(t(lang, "ask_payment_method"), reply_markup=PAYMENT_METHOD_MENU)
+        await reply_text_safe(update,t(lang, "ask_payment_method"), reply_markup=PAYMENT_METHOD_MENU)
     elif key == "Del":
-        await update.message.reply_text(t(lang, "ask_delivery_status"), reply_markup=DELIVERY_STATUS_MENU)
+        await reply_text_safe(update,t(lang, "ask_delivery_status"), reply_markup=DELIVERY_STATUS_MENU)
     else:
-        await update.message.reply_text(t(lang, "enter_new_value", field=EDIT_FIELDS[key]), reply_markup=ReplyKeyboardRemove())
+        await reply_text_safe(update,t(lang, "enter_new_value", field=EDIT_FIELDS[key]), reply_markup=ReplyKeyboardRemove())
     return ASK_EDIT_VALUE
 
 
@@ -241,14 +254,14 @@ async def receive_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
     value = update.message.text.strip()
     cleaned = value.replace(",", "")
     if key == "Qty" and not cleaned.isdigit():
-        await update.message.reply_text(t(lang, "invalid_quantity"))
+        await reply_text_safe(update,t(lang, "invalid_quantity"))
         return ASK_EDIT_VALUE
     if key == "Amt" and not cleaned.isdigit():
-        await update.message.reply_text(t(lang, "invalid_amount"))
+        await reply_text_safe(update,t(lang, "invalid_amount"))
         return ASK_EDIT_VALUE
     context.user_data["order"][field] = cleaned if key in {"Qty", "Amt"} else value
     context.user_data.pop("edit_key", None)
-    await update.message.reply_text(
+    await reply_text_safe(update,
         order_preview(context.user_data["order"], lang) + "\n\n" + t(lang, "correct_question"),
         reply_markup=confirm_menu(lang),
     )
@@ -260,7 +273,7 @@ async def show_unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     rows = admin_service_from_context(context).unpaid_orders()
     title = "Unpaid List 📋" if lang == "en" else "မရှင်းရစာရင်း 📋"
     empty = "No unpaid/COD/deposit orders ✅" if lang == "en" else "မရှင်းရ/COD/Deposit order မရှိပါ ✅"
-    await update.message.reply_text(list_message(title, rows, empty), reply_markup=main_menu(lang))
+    await reply_text_safe(update,list_message(title, rows, empty), reply_markup=main_menu(lang))
 
 
 async def show_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -268,20 +281,20 @@ async def show_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     rows = admin_service_from_context(context).pending_delivery_orders()
     title = "Pending Delivery 🚚" if lang == "en" else "ပို့ရန်စာရင်း 🚚"
     empty = "No pending delivery orders ✅" if lang == "en" else "ပို့ရန်ကျန် order မရှိပါ ✅"
-    await update.message.reply_text(list_message(title, rows, empty), reply_markup=main_menu(lang))
+    await reply_text_safe(update,list_message(title, rows, empty), reply_markup=main_menu(lang))
 
 
 async def show_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = get_lang(update, context) or "en"
     report = admin_service_from_context(context).today_report()
-    await update.message.reply_text(today_report_message(report, lang), reply_markup=main_menu(lang))
+    await reply_text_safe(update,today_report_message(report, lang), reply_markup=main_menu(lang))
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = get_lang(update, context) or "en"
     context.user_data.pop("order", None)
     context.user_data.pop("edit_key", None)
-    await update.message.reply_text(t(lang, "cancelled"), reply_markup=main_menu(lang))
+    await reply_text_safe(update,t(lang, "cancelled"), reply_markup=main_menu(lang))
     return ConversationHandler.END
 
 
